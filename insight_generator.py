@@ -169,6 +169,72 @@ def contains_pattern(text: str, patterns: List[str]) -> bool:
     return any(pattern in lowered for pattern in patterns)
 
 
+def concise_theme(label: str, prefix: str) -> str:
+    text = re.sub(r"\s+", " ", str(label)).strip()
+    lowered = text.lower()
+
+    replacements = [
+        ("overall quality of products and services", "Overall Quality"),
+        ("overall quality", "Overall Quality"),
+        ("value in terms of business impact", "Business Impact"),
+        ("business impact", "Business Impact"),
+        ("ease of doing business", "Ease of Doing Business"),
+        ("confident recommending", "Recommendation Advocacy"),
+        ("recommend", "Recommendation Advocacy"),
+        ("technology partner", "Technology Partner Rating"),
+        ("preference", "Partner Preference"),
+        ("intuitiveness", "User Experience"),
+        ("user interface", "User Experience"),
+        ("performance", "Performance"),
+        ("scalability", "Scalability"),
+        ("security", "Security"),
+        ("reliability", "Reliability"),
+        ("flexibility", "Flexibility"),
+        ("continuous improvement", "Continuous Improvement"),
+        ("rapid application development", "Low-Code Development"),
+        ("low code", "Low-Code Development"),
+        ("implementation and support", "Implementation Support"),
+        ("implementation", "Implementation Support"),
+        ("support", "Support Experience"),
+        ("service level", "Support Responsiveness"),
+        ("response time", "Support Responsiveness"),
+        ("customer relationships", "Relationship Engagement"),
+        ("long-term customer relationships", "Relationship Engagement"),
+        ("customer meets", "Customer Engagement"),
+        ("feedback forums", "Customer Engagement"),
+        ("communication", "Communication"),
+        ("product updates", "Communication"),
+        ("recognition", "Project Team Recognition"),
+        ("reduce costs", "Efficiency and Cost Reduction"),
+        ("employee efficiency", "Efficiency and Cost Reduction"),
+        ("regulatory", "Risk and Compliance"),
+        ("comply", "Risk and Compliance"),
+        ("customer experience", "Customer Experience"),
+        ("remote working", "Remote Working"),
+        ("return on investments", "ROI"),
+        ("serve you better", "Open-Ended Improvement"),
+        ("focus areas", "Future Focus Areas"),
+        ("digital transformation", "Digital Transformation Journey"),
+    ]
+
+    for pattern, theme in replacements:
+        if pattern in lowered:
+            return theme
+
+    cleaned = re.sub(r"please\s+rate\s+", "", text, flags=re.I)
+    cleaned = re.sub(r"newgen('?s)?\s+", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"on the following parameters:?", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"which of the following\s+", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"::.*", "", cleaned).strip(" :-")
+
+    words = re.findall(r"[A-Za-z0-9]+", cleaned)
+    if not words:
+        return prefix
+
+    short = " ".join(words[:5]).title()
+    return short if short else prefix
+
+
 def numeric_series(series: pd.Series, drop_cant_say: bool = False) -> pd.Series:
     values = pd.to_numeric(series, errors="coerce").dropna()
     if drop_cant_say:
@@ -196,19 +262,20 @@ def generate_rating_insight(insight_id: str, column: str, label: str, values: pd
     mean = values.mean()
     top2 = (values >= 4).mean() * 100
     low = (values <= 2).mean() * 100
+    theme = concise_theme(label, "Rating")
 
     if top2 >= 65 and low < 15:
-        text = f"{label} appears to be a relative strength, with {top2:.1f}% top-two-box ratings and a mean score of {mean:.2f}/5."
+        text = f"{theme} appears to be a relative strength, with {top2:.1f}% top-two-box ratings and a mean score of {mean:.2f}/5."
     elif low >= 20 or top2 < 45:
-        text = f"{label} needs human attention, as {low:.1f}% of valid respondents gave low ratings despite a mean score of {mean:.2f}/5."
+        text = f"{theme} needs human attention, as {low:.1f}% of valid respondents gave low ratings despite a mean score of {mean:.2f}/5."
     else:
-        text = f"{label} shows moderate customer confidence, with a mean score of {mean:.2f}/5 and {top2:.1f}% top-two-box ratings."
+        text = f"{theme} shows moderate customer confidence, with a mean score of {mean:.2f}/5 and {top2:.1f}% top-two-box ratings."
 
     return {
         "insight_id": insight_id,
-        "theme": f"Rating: {label}",
+        "theme": theme,
         "insight_text": text,
-        "evidence_note": f"{column}: n={len(values)}, mean={mean:.2f}/5, top-two-box={top2:.1f}%, low ratings={low:.1f}%.",
+        "evidence_note": f"{column} ({label}): n={len(values)}, mean={mean:.2f}/5, top-two-box={top2:.1f}%, low ratings={low:.1f}%.",
     }
 
 
@@ -217,19 +284,20 @@ def generate_nps_insight(insight_id: str, column: str, label: str, values: pd.Se
     passives = ((values >= 7) & (values <= 8)).mean() * 100
     detractors = (values <= 6).mean() * 100
     nps = promoters - detractors
+    theme = concise_theme(label, "Recommendation Advocacy")
 
     if nps >= 40 and detractors < 15:
-        text = f"{label} shows strong customer advocacy, with an NPS-style score of {nps:.1f} and {promoters:.1f}% promoters."
+        text = f"{theme} shows strong customer advocacy, with an NPS-style score of {nps:.1f} and {promoters:.1f}% promoters."
     elif nps < 10 or detractors >= 30:
-        text = f"{label} needs human attention because advocacy is weak, with an NPS-style score of {nps:.1f} and {detractors:.1f}% detractors."
+        text = f"{theme} needs human attention because advocacy is weak, with an NPS-style score of {nps:.1f} and {detractors:.1f}% detractors."
     else:
-        text = f"{label} shows moderate advocacy, with an NPS-style score of {nps:.1f}, {promoters:.1f}% promoters, {passives:.1f}% passives, and {detractors:.1f}% detractors."
+        text = f"{theme} shows moderate advocacy, with an NPS-style score of {nps:.1f}, {promoters:.1f}% promoters, {passives:.1f}% passives, and {detractors:.1f}% detractors."
 
     return {
         "insight_id": insight_id,
-        "theme": f"Advocacy: {label}",
+        "theme": theme,
         "insight_text": text,
-        "evidence_note": f"{column}: n={len(values)}, promoters={promoters:.1f}%, passives={passives:.1f}%, detractors={detractors:.1f}%, NPS-style score={nps:.1f}.",
+        "evidence_note": f"{column} ({label}): n={len(values)}, promoters={promoters:.1f}%, passives={passives:.1f}%, detractors={detractors:.1f}%, NPS-style score={nps:.1f}.",
     }
 
 
@@ -242,12 +310,13 @@ def generate_binary_insight(insight_id: str, column: str, label: str, values: pd
     pct = selected / total_n * 100 if total_n else 0
     if pct < 10:
         return None
+    theme = concise_theme(label, "Selection Theme")
 
     return {
         "insight_id": insight_id,
-        "theme": f"Selection theme: {label}",
-        "insight_text": f"{label} is selected by {pct:.1f}% of respondents, making it a visible theme in the survey response pattern.",
-        "evidence_note": f"{column}: selected n={int(selected)} out of total n={total_n}, selected percentage={pct:.1f}%.",
+        "theme": theme,
+        "insight_text": f"{theme} is selected by {pct:.1f}% of respondents, making it a visible theme in the survey response pattern.",
+        "evidence_note": f"{column} ({label}): selected n={int(selected)} out of total n={total_n}, selected percentage={pct:.1f}%.",
     }
 
 
@@ -268,12 +337,13 @@ def generate_text_insight(insight_id: str, column: str, label: str, series: pd.S
     top_words = [word for word, _ in Counter(words).most_common(6)]
     if not top_words:
         return None
+    theme = concise_theme(label, "Open-Ended Theme")
 
     return {
         "insight_id": insight_id,
-        "theme": f"Open-ended theme: {label}",
-        "insight_text": f"Open-ended responses for {label} suggest recurring themes around {', '.join(top_words[:5])}; this should be coded qualitatively before client reporting.",
-        "evidence_note": f"{column}: {len(responses)} open-ended responses reviewed; frequent terms include {', '.join(top_words)}.",
+        "theme": theme,
+        "insight_text": f"Open-ended responses for {theme} suggest recurring themes around {', '.join(top_words[:5])}; this should be coded qualitatively before client reporting.",
+        "evidence_note": f"{column} ({label}): {len(responses)} open-ended responses reviewed; frequent terms include {', '.join(top_words)}.",
     }
 
 
