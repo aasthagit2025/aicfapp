@@ -1,0 +1,4 @@
+insight_id,insight_text,evidence_strength,methodological_fit,triangulation,interpretability,business_relevance,actionability,bias_risk
+I001,"Customers show moderate-positive satisfaction, but low-rating shares indicate improvement is still required.",5,5,4,5,5,5,5
+I002,"The AI claims all customers are fully satisfied and no improvement is needed.",2,3,2,4,4,2,2
+I003,"Open-ended comments suggest delivery timelines may need further qualitative coding before client reporting.",3,4,3,4,5,4,4
