@@ -9,6 +9,81 @@ from typing import BinaryIO, Dict, List, Tuple
 import pandas as pd
 
 
+SKIP_COLUMN_PATTERNS = [
+    "flag",
+    "count",
+    "terminate",
+    "elapsed",
+    "starttime",
+    "endtime",
+    "password",
+    "unique",
+    "respid",
+    "respnum",
+    "serial",
+    "token",
+    "email",
+    "phone",
+    "mobile",
+    "name",
+    "address",
+    "ip",
+    "url",
+    "browser",
+    "device",
+    "dummy",
+    "hidden question",
+    "punching",
+]
+
+CATEGORICAL_LABEL_PATTERNS = [
+    "employment status",
+    "current primary employment",
+    "gender",
+    "age",
+    "region",
+    "vertical",
+    "profile",
+    "role",
+    "department",
+    "designation",
+    "category",
+    "type",
+    "tenure",
+    "which of the following best describes",
+]
+
+RATING_LABEL_PATTERNS = [
+    "rate",
+    "rating",
+    "satisfaction",
+    "quality",
+    "value",
+    "ease",
+    "performance",
+    "scalability",
+    "security",
+    "reliability",
+    "flexibility",
+    "improvement",
+    "implementation",
+    "support",
+    "relationship",
+    "communication",
+    "recognition",
+    "preference",
+]
+
+NPS_LABEL_PATTERNS = [
+    "recommend",
+    "nps",
+    "advocacy",
+    "confident recommending",
+    "colleague",
+    "peer",
+]
+
+
 def read_survey_file(uploaded_file: BinaryIO) -> Tuple[pd.DataFrame, Dict[str, str]]:
     name = uploaded_file.name.lower()
     labels: Dict[str, str] = {}
@@ -80,19 +155,39 @@ def readable_label(column: str, labels: Dict[str, str], questionnaire_text: str)
     return cleaned
 
 
-def numeric_series(series: pd.Series) -> pd.Series:
+def should_skip_column(column: str, label: str) -> bool:
+    text = f"{column} {label}".lower()
+    if any(pattern in text for pattern in SKIP_COLUMN_PATTERNS):
+        return True
+    if any(pattern in text for pattern in CATEGORICAL_LABEL_PATTERNS):
+        return True
+    return False
+
+
+def contains_pattern(text: str, patterns: List[str]) -> bool:
+    lowered = text.lower()
+    return any(pattern in lowered for pattern in patterns)
+
+
+def numeric_series(series: pd.Series, drop_cant_say: bool = False) -> pd.Series:
     values = pd.to_numeric(series, errors="coerce").dropna()
-    return values[values != 9]
+    if drop_cant_say:
+        return values[values != 9]
+    return values
 
 
-def is_rating_1_to_5(values: pd.Series) -> bool:
+def is_rating_1_to_5(values: pd.Series, label: str) -> bool:
     if values.empty:
+        return False
+    if not contains_pattern(label, RATING_LABEL_PATTERNS):
         return False
     return values.min() >= 1 and values.max() <= 5 and values.nunique() >= 2
 
 
-def is_nps_0_to_10(values: pd.Series) -> bool:
+def is_nps_0_to_10(values: pd.Series, label: str) -> bool:
     if values.empty:
+        return False
+    if not contains_pattern(label, NPS_LABEL_PATTERNS):
         return False
     return values.min() >= 0 and values.max() <= 10 and values.nunique() >= 5
 
@@ -197,14 +292,18 @@ def generate_insights(
             break
 
         label = readable_label(str(column), labels, questionnaire_text)
+        if should_skip_column(str(column), label):
+            continue
+
         values = numeric_series(df[column])
 
         if len(values) >= max(10, total_n * 0.20):
-            if is_rating_1_to_5(values):
-                insights.append(generate_rating_insight(f"AI-{len(insights) + 1:03d}", str(column), label, values))
-                continue
-            if is_nps_0_to_10(values):
+            if is_nps_0_to_10(values, label):
                 insights.append(generate_nps_insight(f"AI-{len(insights) + 1:03d}", str(column), label, values))
+                continue
+            rating_values = numeric_series(df[column], drop_cant_say=True)
+            if is_rating_1_to_5(rating_values, label):
+                insights.append(generate_rating_insight(f"AI-{len(insights) + 1:03d}", str(column), label, rating_values))
                 continue
 
             binary = generate_binary_insight(f"AI-{len(insights) + 1:03d}", str(column), label, values, total_n)

@@ -34,10 +34,17 @@ def make_template() -> pd.DataFrame:
 
 
 def score_dataframe(df: pd.DataFrame, use_manual_scores: bool = False) -> pd.DataFrame:
-    results = [
-        score_insight(row.to_dict(), use_manual_scores=use_manual_scores).__dict__
-        for _, row in df.iterrows()
-    ]
+    results = []
+    for _, row in df.iterrows():
+        row_dict = row.to_dict()
+        try:
+            scored = score_insight(row_dict, use_manual_scores=use_manual_scores)
+        except TypeError:
+            scored = score_insight(row_dict)
+        if hasattr(scored, "__dict__"):
+            results.append(scored.__dict__)
+        else:
+            results.append(dict(scored))
     return pd.DataFrame(results)
 
 
