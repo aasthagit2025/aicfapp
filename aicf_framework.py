@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -43,17 +44,26 @@ DIMENSIONS = {
 }
 
 
-REQUIRED_COLUMNS = ["insight_id", "insight_text", *DIMENSIONS.keys()]
+REQUIRED_COLUMNS = ["insight_id", "insight_text"]
+MANUAL_SCORE_COLUMNS = list(DIMENSIONS.keys())
 
 
 @dataclass
 class AICFResult:
     insight_id: str
     insight_text: str
+    evidence_strength: int
+    methodological_fit: int
+    triangulation: int
+    interpretability: int
+    business_relevance: int
+    actionability: int
+    bias_risk: int
     weighted_score: float
     confidence_level: str
     weakest_dimensions: str
     recommendation: str
+    scoring_mode: str
 
 
 def parse_score(value: object, column: str) -> int:
@@ -77,11 +87,86 @@ def confidence_level(score: float) -> str:
     return "Low Confidence"
 
 
-def score_insight(row: Dict[str, object]) -> AICFResult:
-    dimension_scores = {
-        key: parse_score(row.get(key), key)
-        for key in DIMENSIONS
+def clamp_score(score: int) -> int:
+    return max(1, min(5, score))
+
+
+def has_numeric_evidence(text: str) -> bool:
+    return bool(re.search(r"\b\d+(\.\d+)?\s*(%|/5|/10|respondents?|n=|mean|score|rating|top)", text, re.I))
+
+
+def contains_any(text: str, words: List[str]) -> bool:
+    lowered = text.lower()
+    return any(word in lowered for word in words)
+
+
+def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
+    insight = str(row.get("insight_text", "") or "")
+    evidence = str(row.get("evidence_note", "") or "")
+    combined = f"{insight} {evidence}".strip()
+    word_count = len(re.findall(r"\w+", insight))
+
+    scores = {
+        "evidence_strength": 3,
+        "methodological_fit": 3,
+        "triangulation": 3,
+        "interpretability": 3,
+        "business_relevance": 3,
+        "actionability": 3,
+        "bias_risk": 3,
     }
+
+    if has_numeric_evidence(combined):
+        scores["evidence_strength"] += 1
+    if contains_any(combined, ["n=", "sample", "respondents", "survey", "mean", "top-two", "rating", "score"]):
+        scores["evidence_strength"] += 1
+    if contains_any(combined, ["requires validation", "needs validation", "unsupported", "not establish", "not yet", "hypothesis"]):
+        scores["evidence_strength"] -= 1
+
+    if contains_any(combined, ["customer", "satisfaction", "market", "survey", "respondent", "brand", "product", "service", "business"]):
+        scores["methodological_fit"] += 1
+    if contains_any(combined, ["caused by", "main reason", "fully satisfied", "only serious", "exclusive benchmark", "no improvement"]):
+        scores["methodological_fit"] -= 1
+
+    if contains_any(combined, ["compared", "across", "followed by", "alongside", "linked", "triangulat", "open-ended", "rating"]):
+        scores["triangulation"] += 1
+    if contains_any(combined, ["requires validation", "not coded", "does not establish", "weak base", "unsupported"]):
+        scores["triangulation"] -= 1
+    if contains_any(combined, ["primary cause", "main reason", "only serious", "all customers"]):
+        scores["triangulation"] -= 1
+
+    if 12 <= word_count <= 55:
+        scores["interpretability"] += 1
+    if contains_any(combined, ["unclear", "vague", "maybe", "somehow"]):
+        scores["interpretability"] -= 1
+
+    if contains_any(combined, ["customer", "client", "business", "revenue", "cost", "roi", "satisfaction", "preference", "recommend", "retention"]):
+        scores["business_relevance"] += 1
+
+    if contains_any(combined, ["should", "priority", "improve", "focus", "recommend", "action", "opportunity", "strengthen", "investigate"]):
+        scores["actionability"] += 1
+    if contains_any(combined, ["no improvement", "exclusive benchmark", "reduce investment"]):
+        scores["actionability"] -= 1
+
+    if contains_any(combined, ["requires validation", "unsupported", "causal", "fully satisfied", "all customers", "only serious", "primary cause", "reduce investment"]):
+        scores["bias_risk"] -= 1
+    if contains_any(combined, ["moderate", "suggest", "may", "should be interpreted", "requires validation", "hypothesis"]):
+        scores["bias_risk"] += 1
+
+    return {key: clamp_score(value) for key, value in scores.items()}
+
+
+def score_insight(row: Dict[str, object]) -> AICFResult:
+    has_manual_scores = all(row.get(key) not in (None, "") for key in MANUAL_SCORE_COLUMNS)
+    if has_manual_scores:
+        dimension_scores = {
+            key: parse_score(row.get(key), key)
+            for key in DIMENSIONS
+        }
+        scoring_mode = "Manual evaluator scores"
+    else:
+        dimension_scores = auto_dimension_scores(row)
+        scoring_mode = "AICF auto-estimated scores"
 
     weighted_score = sum(
         dimension_scores[key] * DIMENSIONS[key]["weight"]
@@ -105,10 +190,18 @@ def score_insight(row: Dict[str, object]) -> AICFResult:
     return AICFResult(
         insight_id=str(row.get("insight_id", "")).strip(),
         insight_text=str(row.get("insight_text", "")).strip(),
+        evidence_strength=dimension_scores["evidence_strength"],
+        methodological_fit=dimension_scores["methodological_fit"],
+        triangulation=dimension_scores["triangulation"],
+        interpretability=dimension_scores["interpretability"],
+        business_relevance=dimension_scores["business_relevance"],
+        actionability=dimension_scores["actionability"],
+        bias_risk=dimension_scores["bias_risk"],
         weighted_score=round(weighted_score, 2),
         confidence_level=confidence_level(weighted_score),
         weakest_dimensions="; ".join(weakest_labels),
         recommendation=" ".join(recommended_actions),
+        scoring_mode=scoring_mode,
     )
 
 
