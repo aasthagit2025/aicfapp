@@ -39,6 +39,10 @@ SKIP_COLUMN_PATTERNS = [
     "are you employed in the following",
     "screenout",
     "screener",
+    "would you like to be contacted",
+    "keep your feedback anonymous",
+    "anonymous",
+    "prior permission",
 ]
 
 CATEGORICAL_LABEL_PATTERNS = [

@@ -6,6 +6,7 @@ import streamlit as st
 from aicf_framework import DIMENSIONS, REQUIRED_COLUMNS, score_insight, validate_columns
 from insight_generator import extract_questionnaire_text, generate_insights, read_survey_file
 
+APP_VERSION = "AICF Streamlit Tool v4"
 
 st.set_page_config(
     page_title="AICF Tool",
@@ -49,7 +50,7 @@ def score_dataframe(df: pd.DataFrame, use_manual_scores: bool = False) -> pd.Dat
 
 
 st.title("AI Insight Confidence Framework")
-st.caption("Generate insights from survey data or upload existing insights, then let AICF score confidence and flag human review needs.")
+st.caption(f"{APP_VERSION} - Generate insights from survey data or upload existing insights, then let AICF score confidence and flag human review needs.")
 
 with st.sidebar:
     st.header("AICF Dimensions")
