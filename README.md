@@ -1,10 +1,15 @@
 # AI Insight Confidence Framework (AICF) Tool
 
-This is a simple Streamlit app for scoring AI-generated market research insights using the AI Insight Confidence Framework.
+This is a Streamlit app for generating and scoring AI-generated market research insights using the AI Insight Confidence Framework.
 
 ## What The Tool Does
 
-The tool takes a CSV file of AI-generated insights and scores each insight across seven AICF dimensions:
+The tool supports two workflows:
+
+1. Upload survey data and an optional questionnaire. The tool generates AI-style insights and evidence notes, then scores them with AICF.
+2. Upload existing AI-generated insights. The tool scores them with AICF.
+
+The tool automatically estimates confidence across seven AICF dimensions:
 
 - Evidence Strength
 - Methodological Fit
@@ -23,16 +28,25 @@ It returns:
 
 ## Required CSV Columns
 
+For the "Score Existing Insights" workflow:
+
 ```text
-insight_id, insight_text, evidence_strength, methodological_fit, triangulation, interpretability, business_relevance, actionability, bias_risk
+insight_id, insight_text
 ```
 
-Scores should be from `1` to `5`.
+Optional but recommended:
 
-For `bias_risk`, use:
+```text
+evidence_note
+```
 
-- `1` = high risk
-- `5` = low risk / well controlled
+The app auto-generates the AICF dimension scores. If you also include manual score columns, the app will use those manual scores instead:
+
+```text
+evidence_strength, methodological_fit, triangulation, interpretability, business_relevance, actionability, bias_risk
+```
+
+Manual scores should be from `1` to `5`.
 
 ## Run Locally
 
@@ -44,7 +58,7 @@ streamlit run app.py
 ## Deploy On Streamlit Community Cloud
 
 1. Create a GitHub repository.
-2. Upload `app.py`, `aicf_framework.py`, `requirements.txt`, and `README.md`.
+2. Upload `app.py`, `aicf_framework.py`, `insight_generator.py`, `requirements.txt`, and `README.md`.
 3. Go to Streamlit Community Cloud.
 4. Select the GitHub repository.
 5. Set the main file path as `app.py`.
@@ -52,4 +66,4 @@ streamlit run app.py
 
 ## Suggested Pilot Use
 
-Use this app to evaluate 20 to 30 AI-generated market research insights. Ask 3 to 5 evaluators to score each insight independently, then compare confidence scores and review where human judgment is required.
+Use this app to generate and evaluate 20 to 30 AI-generated market research insights. For the pilot, first use survey data plus questionnaire to generate insights and evidence notes, then ask 3 to 5 evaluators to review or validate the generated confidence levels.
