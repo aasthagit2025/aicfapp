@@ -102,9 +102,9 @@ def generate_rating_insight(insight_id: str, column: str, label: str, values: pd
     top2 = (values >= 4).mean() * 100
     low = (values <= 2).mean() * 100
 
-    if top2 >= 65:
+    if top2 >= 65 and low < 15:
         text = f"{label} appears to be a relative strength, with {top2:.1f}% top-two-box ratings and a mean score of {mean:.2f}/5."
-    elif low >= 20:
+    elif low >= 20 or top2 < 45:
         text = f"{label} needs human attention, as {low:.1f}% of valid respondents gave low ratings despite a mean score of {mean:.2f}/5."
     else:
         text = f"{label} shows moderate customer confidence, with a mean score of {mean:.2f}/5 and {top2:.1f}% top-two-box ratings."
@@ -122,9 +122,16 @@ def generate_nps_insight(insight_id: str, column: str, label: str, values: pd.Se
     detractors = (values <= 6).mean() * 100
     nps = promoters - detractors
 
+    if nps >= 40 and detractors < 15:
+        text = f"{label} shows strong customer advocacy, with an NPS-style score of {nps:.1f} and {promoters:.1f}% promoters."
+    elif nps < 10 or detractors >= 30:
+        text = f"{label} needs human attention because advocacy is weak, with an NPS-style score of {nps:.1f} and {detractors:.1f}% detractors."
+    else:
+        text = f"{label} shows moderate advocacy, with an NPS-style score of {nps:.1f}, {promoters:.1f}% promoters, {passives:.1f}% passives, and {detractors:.1f}% detractors."
+
     return {
         "insight_id": insight_id,
-        "insight_text": f"{label} shows an advocacy score of {nps:.1f}, with {promoters:.1f}% promoters, {passives:.1f}% passives, and {detractors:.1f}% detractors.",
+        "insight_text": text,
         "evidence_note": f"{column}: n={len(values)}, promoters={promoters:.1f}%, passives={passives:.1f}%, detractors={detractors:.1f}%, NPS-style score={nps:.1f}.",
     }
 

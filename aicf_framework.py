@@ -78,11 +78,11 @@ def parse_score(value: object, column: str) -> int:
 
 
 def confidence_level(score: float) -> str:
-    if score >= 4.20:
+    if score >= 4.00:
         return "High Confidence"
-    if score >= 3.40:
+    if score >= 3.50:
         return "Moderate Confidence"
-    if score >= 2.60:
+    if score >= 2.50:
         return "Low-Moderate Confidence"
     return "Low Confidence"
 
@@ -106,34 +106,31 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
     combined = f"{insight} {evidence}".strip()
     word_count = len(re.findall(r"\w+", insight))
 
-    scores = {
-        "evidence_strength": 3,
-        "methodological_fit": 3,
-        "triangulation": 3,
-        "interpretability": 3,
-        "business_relevance": 3,
-        "actionability": 3,
-        "bias_risk": 3,
-    }
+    high_signal = contains_any(combined, ["relative strength", "strong customer advocacy", "high confidence"])
+    review_signal = contains_any(combined, ["needs human attention", "requires validation", "unsupported", "not coded", "does not establish", "weak base", "overstates"])
+    risky_claim = contains_any(combined, ["fully satisfied", "all customers", "no improvement", "main reason", "primary cause", "only serious", "exclusive benchmark", "reduce investment"])
+
+    base = 4 if high_signal and not review_signal and not risky_claim else 3
+    scores = {key: base for key in DIMENSIONS}
 
     if has_numeric_evidence(combined):
         scores["evidence_strength"] += 1
     if contains_any(combined, ["n=", "sample", "respondents", "survey", "mean", "top-two", "rating", "score"]):
         scores["evidence_strength"] += 1
     if contains_any(combined, ["requires validation", "needs validation", "unsupported", "not establish", "not yet", "hypothesis"]):
-        scores["evidence_strength"] -= 1
+        scores["evidence_strength"] -= 2
 
     if contains_any(combined, ["customer", "satisfaction", "market", "survey", "respondent", "brand", "product", "service", "business"]):
         scores["methodological_fit"] += 1
     if contains_any(combined, ["caused by", "main reason", "fully satisfied", "only serious", "exclusive benchmark", "no improvement"]):
-        scores["methodological_fit"] -= 1
+        scores["methodological_fit"] -= 2
 
-    if contains_any(combined, ["compared", "across", "followed by", "alongside", "linked", "triangulat", "open-ended", "rating"]):
+    if contains_any(combined, ["compared", "across", "followed by", "alongside", "linked", "triangulat", "open-ended"]):
         scores["triangulation"] += 1
     if contains_any(combined, ["requires validation", "not coded", "does not establish", "weak base", "unsupported"]):
-        scores["triangulation"] -= 1
+        scores["triangulation"] -= 2
     if contains_any(combined, ["primary cause", "main reason", "only serious", "all customers"]):
-        scores["triangulation"] -= 1
+        scores["triangulation"] -= 2
 
     if 12 <= word_count <= 55:
         scores["interpretability"] += 1
@@ -146,12 +143,25 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
     if contains_any(combined, ["should", "priority", "improve", "focus", "recommend", "action", "opportunity", "strengthen", "investigate"]):
         scores["actionability"] += 1
     if contains_any(combined, ["no improvement", "exclusive benchmark", "reduce investment"]):
-        scores["actionability"] -= 1
+        scores["actionability"] -= 2
 
     if contains_any(combined, ["requires validation", "unsupported", "causal", "fully satisfied", "all customers", "only serious", "primary cause", "reduce investment"]):
-        scores["bias_risk"] -= 1
+        scores["bias_risk"] -= 2
     if contains_any(combined, ["moderate", "suggest", "may", "should be interpreted", "requires validation", "hypothesis"]):
         scores["bias_risk"] += 1
+
+    if risky_claim:
+        scores["evidence_strength"] -= 1
+        scores["triangulation"] -= 1
+        scores["bias_risk"] -= 1
+
+    if review_signal:
+        scores["evidence_strength"] -= 1
+        scores["triangulation"] -= 1
+
+    if high_signal and not review_signal and not risky_claim:
+        scores["business_relevance"] += 1
+        scores["interpretability"] += 1
 
     return {key: clamp_score(value) for key, value in scores.items()}
 
