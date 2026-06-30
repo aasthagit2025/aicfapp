@@ -18,14 +18,13 @@ def make_template() -> pd.DataFrame:
         [
             {
                 "insight_id": "I001",
-                "insight_text": "Paste an AI-generated market research insight here.",
-                "evidence_strength": 4,
-                "methodological_fit": 4,
-                "triangulation": 3,
-                "interpretability": 4,
-                "business_relevance": 5,
-                "actionability": 4,
-                "bias_risk": 4,
+                "insight_text": "Customers show moderate-positive satisfaction, but low-rating shares indicate improvement is still required.",
+                "evidence_note": "Survey result: mean rating 3.59/5, top-two-box 59.7%, low ratings 18.4%, n=347.",
+            },
+            {
+                "insight_id": "I002",
+                "insight_text": "All customers are fully satisfied, so no improvement is required.",
+                "evidence_note": "Requires validation because the claim overstates the survey evidence.",
             }
         ]
     )
@@ -37,7 +36,7 @@ def score_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 st.title("AI Insight Confidence Framework")
-st.caption("Score AI-generated market research insights before they are shared with stakeholders.")
+st.caption("Upload AI-generated market research insights. AICF will auto-estimate confidence and flag human review needs.")
 
 with st.sidebar:
     st.header("AICF Dimensions")
@@ -53,10 +52,10 @@ with st.sidebar:
         mime="text/csv",
     )
 
-uploaded_file = st.file_uploader("Upload AICF input CSV", type=["csv"])
+uploaded_file = st.file_uploader("Upload insights CSV", type=["csv"])
 
 if uploaded_file is None:
-    st.info("Upload a CSV with insight text and 1 to 5 scores for each AICF dimension.")
+    st.info("Upload a CSV with only `insight_id` and `insight_text`. You may add `evidence_note` for better scoring.")
     st.dataframe(make_template(), use_container_width=True)
     st.stop()
 
@@ -70,7 +69,7 @@ missing_columns = validate_columns(list(df.columns))
 if missing_columns:
     st.error("Your CSV is missing required columns.")
     st.write(missing_columns)
-    st.write("Required columns:")
+    st.write("Minimum required columns:")
     st.code(", ".join(REQUIRED_COLUMNS))
     st.stop()
 
@@ -93,6 +92,14 @@ st.bar_chart(summary.set_index("confidence_level"))
 
 st.subheader("Scored Insights")
 st.dataframe(report, use_container_width=True)
+
+with st.expander("How AICF auto-scoring works"):
+    st.write(
+        "This version uses transparent rule-based checks. It looks for evidence markers "
+        "such as sample size, percentages, ratings, cautious language, action wording, "
+        "overclaims, unsupported causal claims, and validation warnings. For academic "
+        "validation, you can later compare these auto-scores with human evaluator scores."
+    )
 
 csv = report.to_csv(index=False).encode("utf-8")
 st.download_button(
