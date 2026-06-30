@@ -136,6 +136,31 @@ def review_status(score: float, dimension_scores: Dict[str, int]) -> str:
     return "Ready with evidence documentation"
 
 
+def dimension_diagnostics(dimension_scores: Dict[str, int]) -> tuple[str, str]:
+    dimensions_needing_attention = [
+        (key, score)
+        for key, score in sorted(dimension_scores.items(), key=lambda item: item[1])
+        if score <= 3
+    ]
+
+    if not dimensions_needing_attention:
+        return (
+            "No major weak dimension identified",
+            "Proceed, while documenting evidence and analyst review notes.",
+        )
+
+    weakest_labels = [
+        f"{DIMENSIONS[key]['label']} ({score}/5)"
+        for key, score in dimensions_needing_attention[:2]
+    ]
+    recommended_actions = [
+        DIMENSIONS[key]["low_score_action"]
+        for key, score in dimensions_needing_attention[:2]
+    ]
+
+    return "; ".join(weakest_labels), " ".join(recommended_actions)
+
+
 def normalize_theme(value: object) -> str:
     theme = str(value or "").strip()
     if not theme:
@@ -244,19 +269,7 @@ def score_insight(row: Dict[str, object], use_manual_scores: bool = False) -> AI
         for key in DIMENSIONS
     )
 
-    weakest = sorted(dimension_scores.items(), key=lambda item: item[1])[:2]
-    weakest_labels = [
-        f"{DIMENSIONS[key]['label']} ({score}/5)"
-        for key, score in weakest
-    ]
-    recommended_actions = [
-        DIMENSIONS[key]["low_score_action"]
-        for key, score in weakest
-        if score <= 3
-    ]
-
-    if not recommended_actions:
-        recommended_actions = ["Proceed, while documenting evidence and analyst review notes."]
+    weakest_dimensions, recommendation = dimension_diagnostics(dimension_scores)
 
     return AICFResult(
         insight_id=str(row.get("insight_id", "")).strip(),
@@ -273,8 +286,8 @@ def score_insight(row: Dict[str, object], use_manual_scores: bool = False) -> AI
         weighted_score=round(weighted_score, 2),
         confidence_level=confidence_level(weighted_score),
         review_status=review_status(weighted_score, dimension_scores),
-        weakest_dimensions="; ".join(weakest_labels),
-        recommendation=" ".join(recommended_actions),
+        weakest_dimensions=weakest_dimensions,
+        recommendation=recommendation,
         scoring_mode=scoring_mode,
     )
 
