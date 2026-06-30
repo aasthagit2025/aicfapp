@@ -111,6 +111,7 @@ def generate_rating_insight(insight_id: str, column: str, label: str, values: pd
 
     return {
         "insight_id": insight_id,
+        "theme": f"Rating: {label}",
         "insight_text": text,
         "evidence_note": f"{column}: n={len(values)}, mean={mean:.2f}/5, top-two-box={top2:.1f}%, low ratings={low:.1f}%.",
     }
@@ -131,6 +132,7 @@ def generate_nps_insight(insight_id: str, column: str, label: str, values: pd.Se
 
     return {
         "insight_id": insight_id,
+        "theme": f"Advocacy: {label}",
         "insight_text": text,
         "evidence_note": f"{column}: n={len(values)}, promoters={promoters:.1f}%, passives={passives:.1f}%, detractors={detractors:.1f}%, NPS-style score={nps:.1f}.",
     }
@@ -148,6 +150,7 @@ def generate_binary_insight(insight_id: str, column: str, label: str, values: pd
 
     return {
         "insight_id": insight_id,
+        "theme": f"Selection theme: {label}",
         "insight_text": f"{label} is selected by {pct:.1f}% of respondents, making it a visible theme in the survey response pattern.",
         "evidence_note": f"{column}: selected n={int(selected)} out of total n={total_n}, selected percentage={pct:.1f}%.",
     }
@@ -173,6 +176,7 @@ def generate_text_insight(insight_id: str, column: str, label: str, series: pd.S
 
     return {
         "insight_id": insight_id,
+        "theme": f"Open-ended theme: {label}",
         "insight_text": f"Open-ended responses for {label} suggest recurring themes around {', '.join(top_words[:5])}; this should be coded qualitatively before client reporting.",
         "evidence_note": f"{column}: {len(responses)} open-ended responses reviewed; frequent terms include {', '.join(top_words)}.",
     }

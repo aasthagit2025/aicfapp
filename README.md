@@ -37,10 +37,10 @@ insight_id, insight_text
 Optional but recommended:
 
 ```text
-evidence_note
+theme, evidence_note
 ```
 
-The app auto-generates the AICF dimension scores. If you also include manual score columns, the app will use those manual scores instead:
+The app auto-generates the AICF dimension scores by default. If you also include manual score columns, you can choose to use them through the app checkbox:
 
 ```text
 evidence_strength, methodological_fit, triangulation, interpretability, business_relevance, actionability, bias_risk

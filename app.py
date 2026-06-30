@@ -19,11 +19,13 @@ def make_template() -> pd.DataFrame:
         [
             {
                 "insight_id": "I001",
+                "theme": "Overall satisfaction",
                 "insight_text": "Customers show moderate-positive satisfaction, but low-rating shares indicate improvement is still required.",
                 "evidence_note": "Survey result: mean rating 3.59/5, top-two-box 59.7%, low ratings 18.4%, n=347.",
             },
             {
                 "insight_id": "I002",
+                "theme": "Human review example",
                 "insight_text": "All customers are fully satisfied, so no improvement is required.",
                 "evidence_note": "Requires validation because the claim overstates the survey evidence.",
             }
@@ -31,8 +33,11 @@ def make_template() -> pd.DataFrame:
     )
 
 
-def score_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    results = [score_insight(row.to_dict()).__dict__ for _, row in df.iterrows()]
+def score_dataframe(df: pd.DataFrame, use_manual_scores: bool = False) -> pd.DataFrame:
+    results = [
+        score_insight(row.to_dict(), use_manual_scores=use_manual_scores).__dict__
+        for _, row in df.iterrows()
+    ]
     return pd.DataFrame(results)
 
 
@@ -79,7 +84,7 @@ with mode[0]:
         st.write(f"Generated {len(generated_df)} insights from {len(survey_df)} survey rows.")
         st.dataframe(generated_df, use_container_width=True)
 
-        generated_report = score_dataframe(generated_df)
+        generated_report = score_dataframe(generated_df, use_manual_scores=False)
         st.subheader("AICF Confidence Summary")
         generated_summary = generated_report["confidence_level"].value_counts().rename_axis("confidence_level").reset_index(name="count")
 
@@ -108,6 +113,11 @@ with mode[0]:
 
 with mode[1]:
     uploaded_file = st.file_uploader("Upload insights CSV", type=["csv"])
+    use_manual_scores = st.checkbox(
+        "Use manual evaluator score columns if present",
+        value=False,
+        help="Keep this off when you want AICF to calculate the dimension scores automatically.",
+    )
 
     if uploaded_file is None:
         st.info("Upload a CSV with only `insight_id` and `insight_text`. You may add `evidence_note` for better scoring.")
@@ -128,7 +138,7 @@ with mode[1]:
             st.stop()
 
         try:
-            report = score_dataframe(df)
+            report = score_dataframe(df, use_manual_scores=use_manual_scores)
         except Exception as exc:
             st.error(f"Could not score the insights: {exc}")
             st.stop()

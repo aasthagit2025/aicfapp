@@ -51,7 +51,9 @@ MANUAL_SCORE_COLUMNS = list(DIMENSIONS.keys())
 @dataclass
 class AICFResult:
     insight_id: str
+    theme: str
     insight_text: str
+    evidence_note: str
     evidence_strength: int
     methodological_fit: int
     triangulation: int
@@ -61,6 +63,7 @@ class AICFResult:
     bias_risk: int
     weighted_score: float
     confidence_level: str
+    review_status: str
     weakest_dimensions: str
     recommendation: str
     scoring_mode: str
@@ -100,6 +103,53 @@ def contains_any(text: str, words: List[str]) -> bool:
     return any(word in lowered for word in words)
 
 
+def evidence_strength_score(text: str, review_signal: bool, risky_claim: bool) -> int:
+    score = 2
+
+    if has_numeric_evidence(text):
+        score += 1
+
+    if contains_any(text, ["n=", "sample", "respondents", "survey"]):
+        score += 1
+
+    evidence_markers = 0
+    for marker in ["mean", "top-two", "low ratings", "promoters", "detractors", "nps-style", "selected percentage"]:
+        if marker in text.lower():
+            evidence_markers += 1
+
+    if evidence_markers >= 3 and contains_any(text, ["compared", "across", "followed by", "linked", "open-ended", "triangulat"]):
+        score += 1
+
+    if review_signal:
+        score -= 2
+    if risky_claim:
+        score -= 1
+
+    return clamp_score(score)
+
+
+def review_status(score: float, dimension_scores: Dict[str, int]) -> str:
+    if score < 2.50 or min(dimension_scores.values()) <= 2:
+        return "Human review required"
+    if score < 3.50 or any(value == 3 for value in dimension_scores.values()):
+        return "Researcher check recommended"
+    return "Ready with evidence documentation"
+
+
+def normalize_theme(value: object) -> str:
+    theme = str(value or "").strip()
+    if not theme:
+        return "Not specified"
+
+    lowered = theme.lower()
+    prefix = "human review required:"
+    if lowered.startswith(prefix):
+        cleaned = theme[len(prefix):].strip()
+        return cleaned[:1].upper() + cleaned[1:] if cleaned else "Human review issue"
+
+    return theme
+
+
 def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
     insight = str(row.get("insight_text", "") or "")
     evidence = str(row.get("evidence_note", "") or "")
@@ -109,16 +159,23 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
     high_signal = contains_any(combined, ["relative strength", "strong customer advocacy", "high confidence"])
     review_signal = contains_any(combined, ["needs human attention", "requires validation", "unsupported", "not coded", "does not establish", "weak base", "overstates"])
     risky_claim = contains_any(combined, ["fully satisfied", "all customers", "no improvement", "main reason", "primary cause", "only serious", "exclusive benchmark", "reduce investment"])
+    evidence_markers = sum(
+        1
+        for marker in ["n=", "mean", "top-two", "low ratings", "promoters", "detractors", "nps-style", "selected percentage", "%"]
+        if marker in combined.lower()
+    )
+    complete_survey_evidence = (
+        has_numeric_evidence(combined)
+        and contains_any(combined, ["n=", "respondents", "survey"])
+        and evidence_markers >= 3
+        and not review_signal
+        and not risky_claim
+    )
 
-    base = 4 if high_signal and not review_signal and not risky_claim else 3
+    base = 4 if (high_signal or complete_survey_evidence) and not review_signal and not risky_claim else 3
     scores = {key: base for key in DIMENSIONS}
 
-    if has_numeric_evidence(combined):
-        scores["evidence_strength"] += 1
-    if contains_any(combined, ["n=", "sample", "respondents", "survey", "mean", "top-two", "rating", "score"]):
-        scores["evidence_strength"] += 1
-    if contains_any(combined, ["requires validation", "needs validation", "unsupported", "not establish", "not yet", "hypothesis"]):
-        scores["evidence_strength"] -= 2
+    scores["evidence_strength"] = evidence_strength_score(combined, review_signal, risky_claim)
 
     if contains_any(combined, ["customer", "satisfaction", "market", "survey", "respondent", "brand", "product", "service", "business"]):
         scores["methodological_fit"] += 1
@@ -126,6 +183,8 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
         scores["methodological_fit"] -= 2
 
     if contains_any(combined, ["compared", "across", "followed by", "alongside", "linked", "triangulat", "open-ended"]):
+        scores["triangulation"] += 1
+    if complete_survey_evidence:
         scores["triangulation"] += 1
     if contains_any(combined, ["requires validation", "not coded", "does not establish", "weak base", "unsupported"]):
         scores["triangulation"] -= 2
@@ -142,6 +201,8 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
 
     if contains_any(combined, ["should", "priority", "improve", "focus", "recommend", "action", "opportunity", "strengthen", "investigate"]):
         scores["actionability"] += 1
+    if complete_survey_evidence:
+        scores["actionability"] += 1
     if contains_any(combined, ["no improvement", "exclusive benchmark", "reduce investment"]):
         scores["actionability"] -= 2
 
@@ -149,14 +210,14 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
         scores["bias_risk"] -= 2
     if contains_any(combined, ["moderate", "suggest", "may", "should be interpreted", "requires validation", "hypothesis"]):
         scores["bias_risk"] += 1
+    if complete_survey_evidence:
+        scores["bias_risk"] += 1
 
     if risky_claim:
-        scores["evidence_strength"] -= 1
         scores["triangulation"] -= 1
         scores["bias_risk"] -= 1
 
     if review_signal:
-        scores["evidence_strength"] -= 1
         scores["triangulation"] -= 1
 
     if high_signal and not review_signal and not risky_claim:
@@ -166,8 +227,8 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
     return {key: clamp_score(value) for key, value in scores.items()}
 
 
-def score_insight(row: Dict[str, object]) -> AICFResult:
-    has_manual_scores = all(row.get(key) not in (None, "") for key in MANUAL_SCORE_COLUMNS)
+def score_insight(row: Dict[str, object], use_manual_scores: bool = False) -> AICFResult:
+    has_manual_scores = use_manual_scores and all(row.get(key) not in (None, "") for key in MANUAL_SCORE_COLUMNS)
     if has_manual_scores:
         dimension_scores = {
             key: parse_score(row.get(key), key)
@@ -199,7 +260,9 @@ def score_insight(row: Dict[str, object]) -> AICFResult:
 
     return AICFResult(
         insight_id=str(row.get("insight_id", "")).strip(),
+        theme=normalize_theme(row.get("theme", "")),
         insight_text=str(row.get("insight_text", "")).strip(),
+        evidence_note=str(row.get("evidence_note", "") or "").strip(),
         evidence_strength=dimension_scores["evidence_strength"],
         methodological_fit=dimension_scores["methodological_fit"],
         triangulation=dimension_scores["triangulation"],
@@ -209,6 +272,7 @@ def score_insight(row: Dict[str, object]) -> AICFResult:
         bias_risk=dimension_scores["bias_risk"],
         weighted_score=round(weighted_score, 2),
         confidence_level=confidence_level(weighted_score),
+        review_status=review_status(weighted_score, dimension_scores),
         weakest_dimensions="; ".join(weakest_labels),
         recommendation=" ".join(recommended_actions),
         scoring_mode=scoring_mode,
