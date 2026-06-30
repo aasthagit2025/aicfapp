@@ -10,6 +10,7 @@ import pandas as pd
 
 
 SKIP_COLUMN_PATTERNS = [
+    "sample",
     "flag",
     "count",
     "terminate",
@@ -34,6 +35,10 @@ SKIP_COLUMN_PATTERNS = [
     "dummy",
     "hidden question",
     "punching",
+    "none of the above",
+    "are you employed in the following",
+    "screenout",
+    "screener",
 ]
 
 CATEGORICAL_LABEL_PATTERNS = [
@@ -170,7 +175,7 @@ def contains_pattern(text: str, patterns: List[str]) -> bool:
 
 
 def concise_theme(label: str, prefix: str) -> str:
-    text = re.sub(r"\s+", " ", str(label)).strip()
+    text = extract_item_name(label)
     lowered = text.lower()
 
     replacements = [
@@ -235,6 +240,33 @@ def concise_theme(label: str, prefix: str) -> str:
     return short if short else prefix
 
 
+def extract_item_name(label: str) -> str:
+    text = re.sub(r"\s+", " ", str(label)).strip()
+
+    if ":" in text:
+        after_colon = text.split(":", 1)[1].strip()
+        if after_colon:
+            text = after_colon
+
+    for separator in [" - ", " – ", " — ", " :: "]:
+        if separator in text:
+            text = text.split(separator, 1)[0].strip()
+            break
+
+    text = re.sub(r"\([^)]*\)", "", text).strip()
+    text = re.sub(r"^please\s+rate\s+", "", text, flags=re.I)
+    text = re.sub(r"^newgen('?s)?\s+", "", text, flags=re.I)
+    text = re.sub(r"on the following parameters:?", "", text, flags=re.I)
+    text = re.sub(r"which of the following\s+", "", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip(" :-")
+
+    words = text.split()
+    if len(words) > 8:
+        text = " ".join(words[:8])
+
+    return text or str(label).strip()
+
+
 def numeric_series(series: pd.Series, drop_cant_say: bool = False) -> pd.Series:
     values = pd.to_numeric(series, errors="coerce").dropna()
     if drop_cant_say:
@@ -246,6 +278,8 @@ def is_rating_1_to_5(values: pd.Series, label: str) -> bool:
     if values.empty:
         return False
     if not contains_pattern(label, RATING_LABEL_PATTERNS):
+        return False
+    if values.max() <= 2:
         return False
     return values.min() >= 1 and values.max() <= 5 and values.nunique() >= 2
 
@@ -275,7 +309,7 @@ def generate_rating_insight(insight_id: str, column: str, label: str, values: pd
         "insight_id": insight_id,
         "theme": theme,
         "insight_text": text,
-        "evidence_note": f"{column} ({label}): n={len(values)}, mean={mean:.2f}/5, top-two-box={top2:.1f}%, low ratings={low:.1f}%.",
+        "evidence_note": f"{column}: n={len(values)}, mean={mean:.2f}/5, top-two-box={top2:.1f}%, low ratings={low:.1f}%.",
     }
 
 
@@ -297,7 +331,7 @@ def generate_nps_insight(insight_id: str, column: str, label: str, values: pd.Se
         "insight_id": insight_id,
         "theme": theme,
         "insight_text": text,
-        "evidence_note": f"{column} ({label}): n={len(values)}, promoters={promoters:.1f}%, passives={passives:.1f}%, detractors={detractors:.1f}%, NPS-style score={nps:.1f}.",
+        "evidence_note": f"{column}: n={len(values)}, promoters={promoters:.1f}%, passives={passives:.1f}%, detractors={detractors:.1f}%, NPS-style score={nps:.1f}.",
     }
 
 
@@ -311,12 +345,19 @@ def generate_binary_insight(insight_id: str, column: str, label: str, values: pd
     if pct < 10:
         return None
     theme = concise_theme(label, "Selection Theme")
+    lowered = label.lower()
+    if "currently done" in lowered:
+        insight_text = f"{theme} is currently done by {pct:.1f}% of respondents, making it a visible activity area in the study."
+    elif pct >= 50:
+        insight_text = f"{theme} is selected by a majority of respondents at {pct:.1f}%, making it a prominent survey theme."
+    else:
+        insight_text = f"{theme} is selected by {pct:.1f}% of respondents, making it a visible theme in the survey response pattern."
 
     return {
         "insight_id": insight_id,
         "theme": theme,
-        "insight_text": f"{theme} is selected by {pct:.1f}% of respondents, making it a visible theme in the survey response pattern.",
-        "evidence_note": f"{column} ({label}): selected n={int(selected)} out of total n={total_n}, selected percentage={pct:.1f}%.",
+        "insight_text": insight_text,
+        "evidence_note": f"{column}: selected n={int(selected)} out of total n={total_n}, selected percentage={pct:.1f}%.",
     }
 
 
@@ -343,7 +384,7 @@ def generate_text_insight(insight_id: str, column: str, label: str, series: pd.S
         "insight_id": insight_id,
         "theme": theme,
         "insight_text": f"Open-ended responses for {theme} suggest recurring themes around {', '.join(top_words[:5])}; this should be coded qualitatively before client reporting.",
-        "evidence_note": f"{column} ({label}): {len(responses)} open-ended responses reviewed; frequent terms include {', '.join(top_words)}.",
+        "evidence_note": f"{column}: {len(responses)} open-ended responses reviewed; frequent terms include {', '.join(top_words)}.",
     }
 
 
@@ -368,17 +409,16 @@ def generate_insights(
         values = numeric_series(df[column])
 
         if len(values) >= max(10, total_n * 0.20):
+            binary = generate_binary_insight(f"AI-{len(insights) + 1:03d}", str(column), label, values, total_n)
+            if binary:
+                insights.append(binary)
+                continue
             if is_nps_0_to_10(values, label):
                 insights.append(generate_nps_insight(f"AI-{len(insights) + 1:03d}", str(column), label, values))
                 continue
             rating_values = numeric_series(df[column], drop_cant_say=True)
             if is_rating_1_to_5(rating_values, label):
                 insights.append(generate_rating_insight(f"AI-{len(insights) + 1:03d}", str(column), label, rating_values))
-                continue
-
-            binary = generate_binary_insight(f"AI-{len(insights) + 1:03d}", str(column), label, values, total_n)
-            if binary:
-                insights.append(binary)
                 continue
 
         if df[column].dtype == "object":
