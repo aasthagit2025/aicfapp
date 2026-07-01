@@ -95,7 +95,7 @@ def clamp_score(score: int) -> int:
 
 
 def has_numeric_evidence(text: str) -> bool:
-    return bool(re.search(r"\b\d+(\.\d+)?\s*(%|/5|/10|respondents?|n=|mean|score|rating|top)", text, re.I))
+    return bool(re.search(r"(\b\d+(\.\d+)?\s*(%|/5|/10|respondents?|mean|score|rating|top)|\b(n|base)\s*=\s*\d+)", text, re.I))
 
 
 def contains_any(text: str, words: List[str]) -> bool:
@@ -128,26 +128,77 @@ def evidence_strength_score(text: str, review_signal: bool, risky_claim: bool) -
     return clamp_score(score)
 
 
+def is_table_evidence(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "table " in lowered
+        and "%" in lowered
+        and (
+            " vs total" in lowered
+            or "among " in lowered
+            or "selected percentage" in lowered
+            or "generated banner insights" in lowered
+        )
+    )
+
+
 def review_status(score: float, dimension_scores: Dict[str, int]) -> str:
     if score < 2.50 or min(dimension_scores.values()) <= 2:
         return "Human review required"
+    if score >= 4.00 and min(dimension_scores.values()) >= 3:
+        return "Ready with evidence documentation"
     if score < 3.50 or any(value == 3 for value in dimension_scores.values()):
         return "Researcher check recommended"
     return "Ready with evidence documentation"
 
 
-def dimension_diagnostics(dimension_scores: Dict[str, int]) -> tuple[str, str]:
+def dimension_diagnostics(dimension_scores: Dict[str, int], row: Dict[str, object], weighted_score: float = 0) -> tuple[str, str]:
+    combined = f"{row.get('insight_text', '')} {row.get('evidence_note', '')}"
+    table_evidence = is_table_evidence(combined)
+    theme = str(row.get("theme", "")).lower()
+    is_synthesis = theme in {"overall summary", "complete story"}
+    attention_threshold = 2 if weighted_score >= 4.00 and table_evidence and not is_synthesis else 3
+
     dimensions_needing_attention = [
         (key, score)
         for key, score in sorted(dimension_scores.items(), key=lambda item: item[1])
-        if score <= 3
+        if score <= attention_threshold
     ]
 
     if not dimensions_needing_attention:
-        return (
-            "No major weak dimension identified",
-            "Proceed, while documenting evidence and analyst review notes.",
-        )
+        if table_evidence:
+            return (
+                "No major weak dimension identified",
+                "Proceed with the table-backed insight; document base size, banner definition, and any significance testing before client use.",
+            )
+        return ("No major weak dimension identified", "Proceed, while documenting evidence and analyst review notes.")
+
+    if table_evidence or is_synthesis:
+        weak_keys = [key for key, _ in dimensions_needing_attention]
+        weakest_labels = [
+            f"{DIMENSIONS[key]['label']} ({score}/5)"
+            for key, score in dimensions_needing_attention[:2]
+        ]
+        actions = []
+        if "triangulation" in weak_keys:
+            actions.append("Check whether the banner difference is statistically significant and directionally consistent across related cuts.")
+        if "interpretability" in weak_keys:
+            actions.append("Simplify the table story into a clearer business sentence before sharing.")
+        if "actionability" in weak_keys:
+            actions.append("Add the practical implication for the audience segment or banner group.")
+        if "evidence_strength" in weak_keys:
+            actions.append("Verify the base size and table calculation; the table evidence is present but should be checked for reliability.")
+        if "business_relevance" in weak_keys:
+            actions.append("Connect the banner pattern to a business decision or targeting implication.")
+        if "bias_risk" in weak_keys:
+            actions.append("Avoid over-claiming causality from a descriptive table difference.")
+        if not actions:
+            actions.append("Review the banner cut with analyst judgment before final reporting.")
+        if is_synthesis:
+            actions = [
+                "Review the synthesized story against the detailed table insights and add business context before client presentation."
+            ]
+        return "; ".join(weakest_labels), " ".join(actions)
 
     weakest_labels = [
         f"{DIMENSIONS[key]['label']} ({score}/5)"
@@ -161,9 +212,14 @@ def dimension_diagnostics(dimension_scores: Dict[str, int]) -> tuple[str, str]:
     return "; ".join(weakest_labels), " ".join(recommended_actions)
 
 
+def is_missing(value: object) -> bool:
+    text = str(value or "").strip()
+    return text == "" or text.lower() in {"nan", "none", "null", "not specified"}
+
+
 def normalize_theme(value: object) -> str:
     theme = str(value or "").strip()
-    if not theme:
+    if is_missing(theme):
         return "Not specified"
 
     lowered = theme.lower()
@@ -175,18 +231,42 @@ def normalize_theme(value: object) -> str:
     return theme
 
 
+def infer_theme(row: Dict[str, object]) -> str:
+    theme = normalize_theme(row.get("theme", ""))
+    if theme != "Not specified":
+        return theme
+
+    source = str(row.get("insight_id", "") or "").strip()
+    if not source:
+        return "Not specified"
+
+    bracket_match = re.search(r"\(([^()]*(?:usage|apps?|brand|category|social|dating|voice|streaming|game|awareness|consideration)[^()]*)", source, re.I)
+    if bracket_match:
+        return bracket_match.group(1).replace("Base=", "").strip(" -:/")[:80] or "Not specified"
+
+    cleaned = re.sub(r"\(.*?base\s*=\s*\d+.*?\)", "", source, flags=re.I)
+    cleaned = re.sub(r"^q\d+[a-z]?\.\s*", "", cleaned, flags=re.I)
+    cleaned = cleaned.replace("?", "").strip(" -:/")
+    if cleaned:
+        return cleaned[:80]
+    return "Not specified"
+
+
 def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
     insight = str(row.get("insight_text", "") or "")
-    evidence = str(row.get("evidence_note", "") or "")
-    combined = f"{insight} {evidence}".strip()
+    evidence = "" if is_missing(row.get("evidence_note", "")) else str(row.get("evidence_note", "") or "")
+    source_context = str(row.get("insight_id", "") or "")
+    evidence_context = evidence or source_context
+    combined = f"{insight} {evidence_context}".strip()
     word_count = len(re.findall(r"\w+", insight))
 
+    table_evidence = is_table_evidence(combined)
     high_signal = contains_any(combined, ["relative strength", "strong customer advocacy", "high confidence"])
     review_signal = contains_any(combined, ["needs human attention", "requires validation", "unsupported", "not coded", "does not establish", "weak base", "overstates"])
     risky_claim = contains_any(combined, ["fully satisfied", "all customers", "no improvement", "main reason", "primary cause", "only serious", "exclusive benchmark", "reduce investment"])
     evidence_markers = sum(
         1
-        for marker in ["n=", "mean", "top-two", "low ratings", "promoters", "detractors", "nps-style", "selected percentage", "%"]
+        for marker in ["n=", "base=", "mean", "top-two", "low ratings", "promoters", "detractors", "nps-style", "selected percentage", "%"]
         if marker in combined.lower()
     )
     complete_survey_evidence = (
@@ -201,6 +281,11 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
     scores = {key: base for key in DIMENSIONS}
 
     scores["evidence_strength"] = evidence_strength_score(combined, review_signal, risky_claim)
+    if not evidence and re.search(r"\bbase\s*=\s*\d+", source_context, re.I) and not review_signal and not risky_claim:
+        scores["evidence_strength"] = max(scores["evidence_strength"], 3)
+    if table_evidence and not review_signal and not risky_claim:
+        scores["evidence_strength"] = max(scores["evidence_strength"], 4)
+        scores["methodological_fit"] = max(scores["methodological_fit"], 4)
 
     if contains_any(combined, ["customer", "satisfaction", "market", "survey", "respondent", "brand", "product", "service", "business"]):
         scores["methodological_fit"] += 1
@@ -208,6 +293,8 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
         scores["methodological_fit"] -= 2
 
     if contains_any(combined, ["compared", "across", "followed by", "alongside", "linked", "triangulat", "open-ended"]):
+        scores["triangulation"] += 1
+    if table_evidence and " vs total" in combined.lower():
         scores["triangulation"] += 1
     if complete_survey_evidence:
         scores["triangulation"] += 1
@@ -223,8 +310,12 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
 
     if contains_any(combined, ["customer", "client", "business", "revenue", "cost", "roi", "satisfaction", "preference", "recommend", "retention"]):
         scores["business_relevance"] += 1
+    if table_evidence and contains_any(combined, ["over-indexes", "under-indexes", "leading", "selected"]):
+        scores["business_relevance"] += 1
 
     if contains_any(combined, ["should", "priority", "improve", "focus", "recommend", "action", "opportunity", "strengthen", "investigate"]):
+        scores["actionability"] += 1
+    if table_evidence and contains_any(combined, ["over-indexes", "under-indexes", "leading", "selected"]):
         scores["actionability"] += 1
     if complete_survey_evidence:
         scores["actionability"] += 1
@@ -234,6 +325,8 @@ def auto_dimension_scores(row: Dict[str, object]) -> Dict[str, int]:
     if contains_any(combined, ["requires validation", "unsupported", "causal", "fully satisfied", "all customers", "only serious", "primary cause", "reduce investment"]):
         scores["bias_risk"] -= 2
     if contains_any(combined, ["moderate", "suggest", "may", "should be interpreted", "requires validation", "hypothesis"]):
+        scores["bias_risk"] += 1
+    if table_evidence and not risky_claim:
         scores["bias_risk"] += 1
     if complete_survey_evidence:
         scores["bias_risk"] += 1
@@ -269,13 +362,18 @@ def score_insight(row: Dict[str, object], use_manual_scores: bool = False) -> AI
         for key in DIMENSIONS
     )
 
-    weakest_dimensions, recommendation = dimension_diagnostics(dimension_scores)
+    weakest_dimensions, recommendation = dimension_diagnostics(dimension_scores, row, weighted_score)
+    evidence_note = "" if is_missing(row.get("evidence_note", "")) else str(row.get("evidence_note", "") or "").strip()
+    if not evidence_note:
+        source_context = str(row.get("insight_id", "") or "").strip()
+        if re.search(r"\b(base|n)\s*=\s*\d+", source_context, re.I):
+            evidence_note = f"Source context: {source_context}"
 
     return AICFResult(
         insight_id=str(row.get("insight_id", "")).strip(),
-        theme=normalize_theme(row.get("theme", "")),
+        theme=infer_theme(row),
         insight_text=str(row.get("insight_text", "")).strip(),
-        evidence_note=str(row.get("evidence_note", "") or "").strip(),
+        evidence_note=evidence_note,
         evidence_strength=dimension_scores["evidence_strength"],
         methodological_fit=dimension_scores["methodological_fit"],
         triangulation=dimension_scores["triangulation"],
